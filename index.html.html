@@ -2037,15 +2037,73 @@ function initScene(){
 
   // Load all 5 FBX animations
   var fbxFiles = [
-    {key:'idle',      file:'Neutral_Idle.fbx'},
-    {key:'listening', file:'Listening_To_Music.fbx'},
-    {key:'talking',   file:'Talking.fbx'},
-    {key:'thumbsup',  file:'Standing_Thumbs_Up.fbx'},
-    {key:'dance',     file:'Breakdance_Footwork_2.fbx'},
+    {key:'idle',      file:'https://drive.google.com/uc?export=download&id=1UwMROikqdqdFlRomHHh-zaF6XPi7q7yv'},
+    {key:'listening', file:'https://drive.google.com/uc?export=download&id=1A8KNH5zsOBYwkCUo7mgwvLSQYYMN6yW9'},
+    {key:'talking',   file:'https://drive.google.com/uc?export=download&id=1Vn7MdKCIG5sgYzk0zJUCEVEIJ4FTfCeg'},
+    {key:'thumbsup',  file:'https://drive.google.com/uc?export=download&id=1irY-weYaFY1xaLATeoLgzxAhE0hIyoeU'},
+    {key:'dance',     file:'https://drive.google.com/uc?export=download&id=16tLuwtghxSaTh-MmRZPgkWj5ZTpxHKff'},
   ];
 
   var loader = new THREE.FBXLoader();
   var loaded = 0;
+
+  // ── Google Drive large-file CORS helper ──────────────────────────────
+  // GDrive files >25MB show a virus-scan HTML page instead of the binary.
+  // We fetch via corsproxy.io, follow the confirm redirect, get the real file.
+  function gdriveFetch(url, onProgress, onLoad, onError){
+    var isGDrive = url.indexOf('drive.google.com') !== -1;
+    if(!isGDrive){ onLoad(url); return; } // local file — pass through as-is
+    var proxied = 'https://corsproxy.io/?' + encodeURIComponent(url);
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', proxied, true);
+    xhr.responseType = 'arraybuffer';
+    xhr.onprogress = function(e){ if(onProgress && e.lengthComputable) onProgress(e.loaded/e.total); };
+    xhr.onload = function(){
+      if(xhr.status === 200){
+        // Check if response is HTML (virus-scan page) not binary FBX
+        var bytes = new Uint8Array(xhr.response, 0, 10);
+        var isHtml = bytes[0]===60; // '<'
+        if(isHtml){
+          // Extract confirm token from HTML and retry
+          var html = new TextDecoder().decode(xhr.response);
+          var m = html.match(/confirm=([^&"]+)/);
+          var token = m ? m[1] : 't';
+          var confirmUrl = url + '&confirm=' + token;
+          var proxied2 = 'https://corsproxy.io/?' + encodeURIComponent(confirmUrl);
+          var xhr2 = new XMLHttpRequest();
+          xhr2.open('GET', proxied2, true);
+          xhr2.responseType = 'arraybuffer';
+          xhr2.onprogress = function(e){ if(onProgress && e.lengthComputable) onProgress(e.loaded/e.total); };
+          xhr2.onload = function(){ if(xhr2.status===200) onLoad(xhr2.response); else onError('HTTP '+xhr2.status); };
+          xhr2.onerror = function(){ onError('Network error on retry'); };
+          xhr2.send();
+        } else {
+          onLoad(xhr.response);
+        }
+      } else { onError('HTTP '+xhr.status); }
+    };
+    xhr.onerror = function(){ onError('Network error'); };
+    xhr.send();
+  }
+
+  // Patch FBXLoader to use our fetch helper for GDrive URLs
+  var _origLoad = loader.load.bind(loader);
+  loader.load = function(url, onLoad, onProgress, onError){
+    var isGDrive = url.indexOf('drive.google.com') !== -1;
+    if(!isGDrive){ _origLoad(url, onLoad, onProgress, onError); return; }
+    dbg('Fetching via proxy: '+url.substring(0,60)+'...');
+    gdriveFetch(url,
+      function(p){ dbg('  '+Math.round(p*100)+'%'); },
+      function(buffer){
+        // Parse the arraybuffer directly
+        try {
+          var result = loader.parse(buffer, '');
+          onLoad(result);
+        } catch(e){ if(onError) onError(e); else console.error(e); }
+      },
+      function(err){ dbg('❌ GDrive fetch error: '+err,'#f00'); if(onError) onError(err); }
+    );
+  };
 
   // Load idle first (with full model), then the rest animation-only
   dbg('Loading idle model...');
